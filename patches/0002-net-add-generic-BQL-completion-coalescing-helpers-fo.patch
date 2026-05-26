@@ -1,0 +1,161 @@
+From 1159734818717f4b489f29635bc589fb3b8bb8eb Mon Sep 17 00:00:00 2001
+From: Simon Schippers <simon.schippers@tu-dortmund.de>
+Date: Wed, 20 May 2026 10:10:23 +0200
+Subject: [PATCH 2/5] net: add generic BQL completion coalescing helpers for
+ software interfaces (bql_coal_state)
+
+Introduce include/net/bql_coal.h, a small self-contained header providing
+struct bql_coal_state and a set of inline helpers for batching BQL
+completions over a configurable nanosecond window.
+
+For software interfaces without a periodic completion interrupt, calling
+netdev_tx_completed_queue() for every packet adds unnecessary DQL
+overhead.  bql_coal_state wraps the BQL completion side for such
+software interfaces, letting a driver accumulate completions and flush
+them either when the coalescing window expires or immediately when the
+internal ring is empty and DQL backpressure would stall the producer.
+
+API summary:
+
+  bql_coal_init()           -- initialise state and set window
+  bql_coal_reset()          -- clear pending count (preserves coal_ns)
+  bql_coal_clamp_time()     -- prevent completions firing very late after
+                               CPU migration
+  bql_coal_maybe_complete() -- flush if the window has expired
+  bql_coal_maybe_wake()     -- flush immediately if STACK_XOFF is set,
+                               preventing a TX queue stall
+
+The unit counted in n_pending is left to the driver (packets or bytes);
+it is forwarded as-is to netdev_tx_completed_queue().  Memory barrier
+placement before bql_coal_maybe_wake() is the caller's responsibility.
+
+Signed-off-by: Simon Schippers <simon.schippers@tu-dortmund.de>
+---
+ include/net/bql_coal.h | 115 +++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 115 insertions(+)
+ create mode 100644 include/net/bql_coal.h
+
+diff --git a/include/net/bql_coal.h b/include/net/bql_coal.h
+new file mode 100644
+index 000000000000..52f82da5ec9f
+--- /dev/null
++++ b/include/net/bql_coal.h
+@@ -0,0 +1,115 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Generic BQL (Byte Queue Limits) completion coalescing helpers for software interfaces
++ */
++
++#ifndef _NET_BQL_COAL_H
++#define _NET_BQL_COAL_H
++
++#include <linux/netdevice.h>
++#include <linux/sched/clock.h>
++
++/**
++ * struct bql_coal_state - per-queue BQL completion coalescing state
++ * @time:      sched_clock() timestamp when the current window opened
++ * @n_pending: units (packets or bytes) awaiting reporting to BQL
++ * @coal_ns:   coalescing window in nanoseconds; 0 disables coalescing
++ *
++ * @coal_ns is configuration and is preserved across bql_coal_reset().
++ * @n_pending counts whatever unit the driver passes to
++ * netdev_tx_completed_queue().
++ */
++struct bql_coal_state {
++	u64          time;
++	unsigned int n_pending;
++	u32          coal_ns;
++};
++
++/**
++ * bql_coal_init - initialise coalescing state when a queue is brought up
++ * @s:       state to initialise
++ * @coal_ns: coalescing window in nanoseconds (0 = disabled)
++ */
++static inline void bql_coal_init(struct bql_coal_state *s, u32 coal_ns)
++{
++	s->time      = sched_clock();
++	s->n_pending = 0;
++	s->coal_ns   = coal_ns;
++}
++
++/**
++ * bql_coal_reset - reset pending state when a queue is torn down
++ * @s: state to reset
++ *
++ * Preserves @coal_ns so that configuration survives a queue restart.
++ */
++static inline void bql_coal_reset(struct bql_coal_state *s)
++{
++	s->n_pending = 0;
++	s->time      = 0;
++}
++
++/**
++ * bql_coal_complete - flush all pending completions to DQL immediately
++ * @s:   coalescing state
++ * @txq: peer TX queue to complete against
++ *
++ * Passes 0 for the pkts argument of netdev_tx_completed_queue() because
++ * that parameter is currently ignored by the BQL/DQL core; only bytes
++ * (here: n_pending units) drive the DQL algorithm.
++ */
++static inline void bql_coal_complete(struct bql_coal_state *s,
++				     struct netdev_queue *txq)
++{
++	netdev_tx_completed_queue(txq, 0, s->n_pending);
++	s->n_pending = 0;
++	s->time      = sched_clock();
++}
++
++/**
++ * bql_coal_maybe_complete - flush completions if the coalescing window expired
++ * @s:   coalescing state
++ * @txq: peer TX queue to complete against
++ */
++static inline void bql_coal_maybe_complete(struct bql_coal_state *s,
++					   struct netdev_queue *txq)
++{
++	if (s->n_pending && sched_clock() >= s->time + s->coal_ns)
++		bql_coal_complete(s, txq);
++}
++
++/**
++ * bql_coal_clamp_time - guard against sched_clock() going backwards on
++ *                       CPU migration
++ * @s: coalescing state
++ *
++ * If execution migrates to a CPU whose sched_clock() is behind the stored
++ * timestamp, the deadline would fire very late, depending on the time
++ * difference.  Clamping the stored time to the current clock value keeps
++ * the window bounded.
++ */
++static inline void bql_coal_clamp_time(struct bql_coal_state *s)
++{
++	s->time = min(s->time, sched_clock());
++}
++
++/**
++ * bql_coal_maybe_wake - release pending completions if the TX queue is stalled
++ *                       by DQL backpressure
++ * @s:   coalescing state
++ * @txq: peer TX queue to complete against
++ *
++ * Call this when the internal ring is empty.  The caller must insert an
++ * appropriate read barrier before this call to prevent the empty check from
++ * being reordered past the STACK_XOFF test; an smp_rmb() paired with the
++ * producer's smp_wmb() is a typical example, but the exact barrier depends
++ * on the synchronisation mechanism used by the caller.
++ */
++static inline void bql_coal_maybe_wake(struct bql_coal_state *s,
++				       struct netdev_queue *txq)
++{
++	if (s->n_pending && test_bit(__QUEUE_STATE_STACK_XOFF, &txq->state))
++		bql_coal_complete(s, txq);
++}
++
++#endif /* _NET_BQL_COAL_H */
+-- 
+2.43.0
+
