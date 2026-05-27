@@ -1,7 +1,8 @@
-From 097ae220cf3fa05af0135fde01b2e09ac1763fee Mon Sep 17 00:00:00 2001
+From 87715ac91250015a230f91c32dc3bbcf3ce149c5 Mon Sep 17 00:00:00 2001
 From: Jesper Dangaard Brouer <hawk@kernel.org>
 Date: Tue, 5 May 2026 15:21:57 +0200
-Subject: [PATCH 5/5] net: sched: add timeout count to NETDEV WATCHDOG message
+Subject: [PATCH net-next v6 5/5] net: sched: add timeout count to NETDEV
+ WATCHDOG message
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

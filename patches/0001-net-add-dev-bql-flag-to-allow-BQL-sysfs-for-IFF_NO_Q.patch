@@ -1,7 +1,7 @@
-From f640ba0deeb0274126ec5c5baa487425730b4f55 Mon Sep 17 00:00:00 2001
+From 7bac235c28baa92103c59204c8ed1b42f94255c6 Mon Sep 17 00:00:00 2001
 From: Jesper Dangaard Brouer <hawk@kernel.org>
 Date: Tue, 5 May 2026 15:21:54 +0200
-Subject: [PATCH 1/5] net: add dev->bql flag to allow BQL sysfs for
+Subject: [PATCH net-next v6 1/5] net: add dev->bql flag to allow BQL sysfs for
  IFF_NO_QUEUE devices
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

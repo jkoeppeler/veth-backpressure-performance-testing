@@ -1,8 +1,8 @@
-From b2d2aa35658758726452cf05a65385536c485d60 Mon Sep 17 00:00:00 2001
+From 2ba9a9bd5663a755ce98ecc69380b9349c717a1d Mon Sep 17 00:00:00 2001
 From: Simon Schippers <simon.schippers@tu-dortmund.de>
 Date: Tue, 5 May 2026 15:21:55 +0200
-Subject: [PATCH 3/5] veth: implement Byte Queue Limits (BQL) for latency
- reduction
+Subject: [PATCH net-next v6 3/5] veth: implement Byte Queue Limits (BQL) for
+ latency reduction
 
 Commit dc82a33297fc ("veth: apply qdisc backpressure on full ptr_ring to
 reduce TX drops") gave qdiscs control over veth by returning

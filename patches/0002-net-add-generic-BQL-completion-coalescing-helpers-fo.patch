@@ -1,19 +1,19 @@
-From 1159734818717f4b489f29635bc589fb3b8bb8eb Mon Sep 17 00:00:00 2001
+From 2300558338fc5bc77114105ea643b0d54678652c Mon Sep 17 00:00:00 2001
 From: Simon Schippers <simon.schippers@tu-dortmund.de>
 Date: Wed, 20 May 2026 10:10:23 +0200
-Subject: [PATCH 2/5] net: add generic BQL completion coalescing helpers for
- software interfaces (bql_coal_state)
+Subject: [PATCH net-next v6 2/5] net: add generic BQL completion coalescing
+ helpers for software interfaces (bql_coal_state)
 
 Introduce include/net/bql_coal.h, a small self-contained header providing
 struct bql_coal_state and a set of inline helpers for batching BQL
 completions over a configurable nanosecond window.
 
 For software interfaces without a periodic completion interrupt, calling
-netdev_tx_completed_queue() for every packet adds unnecessary DQL
-overhead.  bql_coal_state wraps the BQL completion side for such
-software interfaces, letting a driver accumulate completions and flush
-them either when the coalescing window expires or immediately when the
-internal ring is empty and DQL backpressure would stall the producer.
+netdev_tx_completed_queue() for every packet does not work.
+bql_coal_state wraps the BQL completion side for such software interfaces,
+letting a driver accumulate completions and flush them either when the
+coalescing window expires or immediately when the ring is empty and the
+queue is stopped due to BQL (BQL starvation).
 
 API summary:
 
@@ -23,11 +23,20 @@ API summary:
                                CPU migration
   bql_coal_maybe_complete() -- flush if the window has expired
   bql_coal_maybe_wake()     -- flush immediately if STACK_XOFF is set,
-                               preventing a TX queue stall
+                               preventing a TX queue stall; the caller is
+                               responsible for the preceding memory barrier
 
 The unit counted in n_pending is left to the driver (packets or bytes);
-it is forwarded as-is to netdev_tx_completed_queue().  Memory barrier
-placement before bql_coal_maybe_wake() is the caller's responsibility.
+it is forwarded as-is to netdev_tx_completed_queue().
+
+Implementation notes:
+
+The inflight and limit values can exceed the driver's internal queue size
+because completion time is mostly independent of producer and consumer
+packet processing.  The actual coalescing window may differ from coal_ns
+depending on how frequently the helpers are called.  If no completion
+helper is called due to a lack of packets to consume, inflight can remain
+stuck above zero for an extended period.
 
 Signed-off-by: Simon Schippers <simon.schippers@tu-dortmund.de>
 ---
