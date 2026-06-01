@@ -25,16 +25,21 @@ extract_pps() {
     echo 0
 }
 
-# Extract average ping RTT (ms) from a result directory.
+# Extract individual ping RTT samples (ms) from a result directory.
+# Prints one value per received reply, or "nan" if there were none.
 extract_ping_rtt() {
     local resultsdir="$1"
     local ping_log="$resultsdir/ping.log"
     if [ -f "$ping_log" ]; then
-        # rtt min/avg/max/mdev = 0.042/0.062/0.125/0.021 ms
-        grep -oP 'rtt [^=]+= [^/]+/\K[0-9.]+' "$ping_log" || echo 0
-        return
+        # "64 bytes from ...: ... time=0.042 ms"
+        local samples
+        samples=$(grep -oP 'time=\K[0-9.]+' "$ping_log")
+        if [ -n "$samples" ]; then
+            echo "$samples"
+            return
+        fi
     fi
-    echo 0
+    echo nan
 }
 
 # Extract p99 ping RTT (ms) from a result directory.
@@ -205,21 +210,39 @@ run_n_times() {
     local cp5_v=() cp25_v=() cp50_v=() cp75_v=() cp95_v=()
 
     for ((i = 1; i <= RUNS; i++)); do
-        echo "  [$label] run $i/$RUNS ..." >&2
+        local attempt=0 pps run_rtts run_rtt_avg rc
+        while true; do
+            attempt=$((attempt + 1))
+            if [[ $attempt -gt 1 ]]; then
+                echo "  [$label] run $i/$RUNS retry $((attempt - 1)) (previous ping=nan) ..." >&2
+            else
+                echo "  [$label] run $i/$RUNS ..." >&2
+            fi
 
-        local rundir
-        rundir=$(mktemp -d "/tmp/veth_bql_bench.${label}.XXXXXX")
+            local rundir
+            rundir=$(mktemp -d "/tmp/veth_bql_bench.${label}.XXXXXX")
 
-        RESULTSDIR="$rundir" "$BENCH_SCRIPTDIR/veth_bql_test.sh" \
-            "${TEST_ARGS[@]}" "${extra_args[@]}" > "$rundir/stdout.log" 2>&1
-        local rc=$?
+            RESULTSDIR="$rundir" "$BENCH_SCRIPTDIR/veth_bql_test.sh" \
+                "${TEST_ARGS[@]}" "${extra_args[@]}" > "$rundir/stdout.log" 2>&1
+            rc=$?
 
-        local pps rtt p99
-        pps=$(extract_pps "$rundir")
-        rtt=$(extract_ping_rtt "$rundir")
+            pps=$(extract_pps "$rundir")
+            run_rtts=$(extract_ping_rtt "$rundir")
+            run_rtt_avg=$(printf '%s\n' "$run_rtts" | \
+                awk '$1 != "nan" {sum+=$1; n++} END {if (n>0) printf "%.3f", sum/n; else print "nan"}')
+
+            echo "    pps=$pps  ping_avg=${run_rtt_avg}ms  exit=$rc" >&2
+
+            [[ "$run_rtt_avg" != "nan" ]] && break
+        done
+
+        local p99
         p99=$(extract_ping_p99 "$rundir")
         pps_values+=("$pps")
-        rtt_values+=("$rtt")
+        # Accumulate individual RTT samples for the final average.
+        while IFS= read -r val; do
+            rtt_values+=("$val")
+        done <<< "$run_rtts"
         p99_values+=("$p99")
 
         local ip5 ip25 ip50 ip75 ip95
@@ -237,13 +260,14 @@ run_n_times() {
         cp5_v+=("$cp5"); cp25_v+=("$cp25"); cp50_v+=("$cp50")
         cp75_v+=("$cp75"); cp95_v+=("$cp95")
 
-        echo "    pps=$pps  ping_avg=${rtt}ms  ping_p99=${p99}ms  interval_p50=${ip50}us  limit_p50=${lp50}  count_p50=${cp50}  exit=$rc" >&2
+        echo "    pps=$pps  ping_avg=${run_rtt_avg}ms  ping_p99=${p99}ms  interval_p50=${ip50}us  limit_p50=${lp50}  count_p50=${cp50}  exit=$rc" >&2
     done
 
     _avg() { printf '%s\n' "$@" | awk '{sum+=$1} END {printf "%.0f", sum/NR}'; }
     _avgf() { printf '%s\n' "$@" | awk '{sum+=$1} END {printf "%.3f", sum/NR}'; }
+    _avgf_nan() { printf '%s\n' "$@" | awk '$1 != "nan" {sum+=$1; n++} END {if (n>0) printf "%.3f", sum/n; else print "nan"}'; }
 
-    echo "$(_avg "${pps_values[@]}") $(_avgf "${rtt_values[@]}") $(_avgf "${p99_values[@]}") \
+    echo "$(_avg "${pps_values[@]}") $(_avgf_nan "${rtt_values[@]}") $(_avgf "${p99_values[@]}") \
 $(_avgf "${ip5_v[@]}") $(_avgf "${ip25_v[@]}") $(_avgf "${ip50_v[@]}") $(_avgf "${ip75_v[@]}") $(_avgf "${ip95_v[@]}") \
 $(_avg "${lp5_v[@]}") $(_avg "${lp25_v[@]}") $(_avg "${lp50_v[@]}") $(_avg "${lp75_v[@]}") $(_avg "${lp95_v[@]}") \
 $(_avg "${cp5_v[@]}") $(_avg "${cp25_v[@]}") $(_avg "${cp50_v[@]}") $(_avg "${cp75_v[@]}") $(_avg "${cp95_v[@]}")"
