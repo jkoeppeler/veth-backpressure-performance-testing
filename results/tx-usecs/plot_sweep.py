@@ -136,7 +136,7 @@ def plot_heatmaps(df, cmdline, outdir, suffix="", use_p99=False):
         for j in range(len(rtt_pivot.columns)):
             val = rtt_pivot.values[i, j]
             if not np.isnan(val):
-                ax_rtt.text(j, i, f"{val:.1f}", ha="center", va="center", fontsize=8)
+                ax_rtt.text(j, i, f"{val:.3f}", ha="center", va="center", fontsize=8)
     fig.colorbar(im2, ax=ax_rtt, shrink=0.8)
 
     if cmdline:
