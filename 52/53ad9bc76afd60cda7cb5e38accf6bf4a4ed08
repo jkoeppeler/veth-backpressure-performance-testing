@@ -1,0 +1,19 @@
+selftests/veth_bql_test.sh
+  s_255310692efb38::t_9df16935044e3f 63-67,95-96,120,159-162,165,195-226,228-233,236-239,242-243,245-246,251-252,256-259,263-264,270-271,278-279,295,297,302-303,314,333,336,347,349-350,352,355,358-367,373-376,383,389,395,406,415-416,419,452,506,509,514,519,522,531,533,617-622,624,633,635,752,754,784,823,831,836-847,853,855-856,925,927-931,937,940,969
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5253ad9bc76afd60cda7cb5e38accf6bf4a4ed08",
+  "prompts": {},
+  "sessions": {
+    "s_255310692efb38": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05bd8c0c8ffeN1mLd4Rg6VVi5i",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jonas Koeppeler <jkoppeler@cloudflare.com>"
+    }
+  }
+}
